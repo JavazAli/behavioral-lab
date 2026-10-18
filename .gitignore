@@ -1,0 +1,8 @@
+node_modules/
+tmp/
+test-results/
+output/
+.clasprc.json
+.clasp.json
+.env*
+!*.example

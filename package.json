@@ -1,0 +1,16 @@
+{
+  "name": "behavioral-lab",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Static Persian behavioral economics lab for the Sharif Minor microeconomics course",
+  "scripts": {
+    "sync:backend": "node scripts/sync-backend.mjs",
+    "test": "node --test tests/*.test.cjs",
+    "preview": "node scripts/serve.mjs",
+    "check": "node scripts/check.mjs",
+    "package": "node scripts/package.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

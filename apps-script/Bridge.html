@@ -1,0 +1,22 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><base target="_top"></head><body>
+<script>
+(function(){
+  'use strict';
+  var allowedOrigin=<?!= allowedOrigin ?>;
+  var channel=<?!= channel ?>;
+  var busy=false;
+  function send(message){window.top.postMessage(Object.assign({namespace:'behavioral-lab-v1',channel:channel},message),allowedOrigin);}
+  window.addEventListener('message',function(event){
+    var m=event.data;
+    if(event.origin!==allowedOrigin||event.source!==window.top||!m||m.namespace!=='behavioral-lab-v1'||m.channel!==channel||m.type!=='request'||!/^[a-zA-Z0-9-]{16,80}$/.test(m.requestId||''))return;
+    if(busy){send({type:'result',requestId:m.requestId,result:{ok:false,error:'یک درخواست در حال اجراست. کمی بعد تلاش کنید.',retryable:true}});return;}
+    if(m.action!=='submit'&&m.action!=='aggregate')return;
+    busy=true;
+    var runner=google.script.run.withSuccessHandler(function(result){busy=false;send({type:'result',requestId:m.requestId,result:result});}).withFailureHandler(function(){busy=false;send({type:'result',requestId:m.requestId,result:{ok:false,error:'ارتباط با سرویس ثبت موقتاً برقرار نیست. دوباره تلاش کنید.',retryable:true}});});
+    if(m.action==='submit')runner.submitRecord(m.payload);else runner.readAggregate(m.payload);
+  });
+  send({type:'ready'});
+})();
+</script>
+</body></html>
