@@ -26,7 +26,7 @@ function submitRecord(record) {
   var error=LabCore.validateSubmission(record,true,studyId);if(error)return fail_(error,false);
   var p=LabCore.cleanParticipant(record.participant);record.participant=p;
   var hash=hashCode_(p.code);
-  if(!validCode_(hash))return fail_('کد فعالیت معتبر نیست. کد دریافتی از مدرس را بررسی کنید.',false);
+  if(!canParticipate_(p.code,hash))return fail_('ورود آزاد به فعالیت هنوز فعال نشده است. کمی بعد دوباره تلاش کنید.',false);
   var lock=LockService.getScriptLock();
   if(!lock.tryLock(1500))return fail_('سامانه در حال ثبت پاسخ‌های دیگر است. کمی بعد دوباره تلاش کنید.',true);
   try {
@@ -40,7 +40,7 @@ function submitRecord(record) {
         if(duplicate[11]!==JSON.stringify(record.answers)||duplicate[6]!==p.studentId)return fail_('برای این شناسه، پاسخ متفاوتی قبلاً ثبت شده است.',false);
         return {ok:true,id:record.id,receivedAt:String(duplicate[1]),duplicate:true,aggregate:aggregate_(rows,studyId,true)};
       }
-      return fail_('این کد قبلاً یک پاسخ نهایی دارد. برای بازیابی یا اصلاح، با مدرس هماهنگ کنید.',false);
+      return fail_('در این مرورگر قبلاً یک پاسخ نهایی ثبت شده است.',false);
     }
     // Idempotent retries remain possible after closure; new responses do not.
     if(props.getProperty('OPEN')!=='true')return fail_('زمان ثبت پاسخ‌ها پایان یافته است. با مدرس هماهنگ کنید.',false);
@@ -69,7 +69,7 @@ function readAggregate(request) {
   var props=PropertiesService.getScriptProperties(),studyId=props.getProperty('STUDY_ID');
   if(!request||request.studyId!==studyId||!/^[a-zA-Z0-9-]{16,80}$/.test(request.id||''))return fail_('درخواست آمار معتبر نیست.',false);
   var code=LabCore.digits(request.code).toUpperCase();if(!/^[A-Z0-9-]{8,64}$/.test(code))return fail_('کد فعالیت نامعتبر است.',false);
-  var hash=hashCode_(code);if(!validCode_(hash))return fail_('کد فعالیت معتبر نیست.',false);
+  var hash=hashCode_(code);if(!canParticipate_(code,hash))return fail_('شناسهٔ ثبت معتبر نیست.',false);
   var cache=CacheService.getScriptCache(),rateKey='read:'+hash;
   if(cache.get(rateKey))return fail_('برای دریافت دوبارهٔ آمار، یک دقیقه فاصله بگذارید.',false);
   // Check the receipt before returning a cached aggregate; no pre-test peeking.
@@ -84,6 +84,12 @@ function readAggregate(request) {
 
 function fail_(message,retryable){return {ok:false,error:message,retryable:retryable};}
 function hashCode_(code){return Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256,code,Utilities.Charset.UTF_8).map(function(b){return ('0'+((b+256)%256).toString(16)).slice(-2);}).join('');}
+// Open registration uses an unguessable, browser-persisted token, never a fingerprint.
+// Legacy receipts remain valid; the private response sheet is never exposed.
+function canParticipate_(code,hash){
+  if(/^OPEN-[0-9A-F]{8}-[0-9A-F]{4}-4[0-9A-F]{3}-[89AB][0-9A-F]{3}-[0-9A-F]{12}$/.test(code))return PropertiesService.getScriptProperties().getProperty('OPEN_REGISTRATION')==='true';
+  return validCode_(hash);
+}
 function validCode_(hash){
   var props=PropertiesService.getScriptProperties(),cache=CacheService.getScriptCache(),key='codes:'+props.getProperty('STUDY_ID'),known=cache.get(key);
   if(!known){var sheet=SpreadsheetApp.openById(props.getProperty('SPREADSHEET_ID')).getSheetByName('Participants');if(!sheet)return false;known=JSON.stringify(readRows_(sheet).map(function(r){return r[1];}));cache.put(key,known,300);}
