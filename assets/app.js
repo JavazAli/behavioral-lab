@@ -93,7 +93,7 @@
     finally{submitting=false;}
   }
   function miniBars(rows,max,unit){
-    max=max||100;unit=unit||'٪';
+    max=max||100;unit=unit===undefined?'٪':unit;
     return '<div class="insight-bars">'+rows.map(function(row){var value=Number(row.value)||0;return '<div class="compare-bar"><div class="bar-label"><span>'+esc(row.label)+'</span><strong>'+n(value)+unit+'</strong></div><div class="bar-track"><div class="bar-fill" style="width:'+Math.max(0,Math.min(100,value/max*100))+'%"></div></div></div>';}).join('')+'</div>';
   }
   function pct(qid,value){var q=aggregate.questions[qid];return q&&q.n?(q.counts[value]||0)/q.n*100:0;}
@@ -122,7 +122,7 @@
   function anchorChart(answers){
     var groups=(aggregate.anchorGroups||[]).filter(function(g){return g.mean!==null;}),r=aggregate.anchor&&aggregate.anchor.r;
     var html='<div class="chart-caption">عدد اولیه و قیمت پیشنهادی · هزار تومان</div>';
-    if(aggregate.anchor){html+='<div class="correlation"><strong dir="ltr">r = '+(r==null?'—':n(r))+'</strong><span>'+(r==null?'عدد اولیه یا قیمت‌ها در کلاس یکسان‌اند؛ شیب خطی قابل محاسبه نیست.':r>0.1?'رابطه هم‌جهت است: عدد بالاتر، قیمت بالاتر.':r<-.1?'رابطه خلاف انتظار لنگر است: عدد بالاتر، قیمت پایین‌تر.':'رابطهٔ خطی کم‌رنگ است؛ قیمت‌ها با عدد اولیه حرکت چندانی ندارند.')+'</span></div>';}else html+='<p>برای دیدن همبستگی، آمار را تازه‌سازی کن.</p>';
+    if(aggregate.anchor){html+='<div class="correlation"><strong dir="ltr">r = '+(r==null?'—':new Intl.NumberFormat('fa-IR',{minimumFractionDigits:2,maximumFractionDigits:2}).format(r))+'</strong><span>'+(r==null?'عدد اولیه یا قیمت‌ها در کلاس یکسان‌اند؛ شیب خطی قابل محاسبه نیست.':r>0.1?'رابطه هم‌جهت است: عدد بالاتر، قیمت بالاتر.':r<-.1?'رابطه خلاف انتظار لنگر است: عدد بالاتر، قیمت پایین‌تر.':'رابطهٔ خطی کم‌رنگ است؛ قیمت‌ها با عدد اولیه حرکت چندانی ندارند.')+'</span></div>';}else html+='<p>برای دیدن همبستگی، آمار را تازه‌سازی کن.</p>';
     var ymax=Math.max(20,Math.ceil(Math.max(answers.anchor_wtp,...groups.map(function(g){return g.mean;}))/20)*20);
     function x(v){return 40+(v-10)/89*330;}function y(v){return 174-v/ymax*140;}
     html+='<svg class="anchor-chart" viewBox="0 0 410 218" role="img" aria-label="رابطهٔ عدد اولیه و میانگین قیمت گروه‌ها؛ پاسخ تو با علامت سبز"><path d="M40 28V174H380" fill="none" stroke="#cbd4bf"/><path d="M40 104H380M40 34H380" stroke="#e8ecdf" stroke-dasharray="3 4"/>';
