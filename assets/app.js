@@ -120,17 +120,18 @@
     return html+'<p class="class-takeaway">نصف کلاس، آستانه‌ای تا '+n(stat.median)+' هزار تومان دارد؛ آستانهٔ تو '+n(answers.fairness_min)+' هزار تومان است.</p>';
   }
   function anchorChart(answers){
-    var groups=aggregate.anchorGroups||[],r=aggregate.anchor&&aggregate.anchor.r;
-    var html='<div class="chart-caption">میانگین قیمت پیشنهادی بر حسب عدد اولیه · هزار تومان</div>';
-    var max=Math.max(20,answers.anchor_wtp,...groups.map(function(g){return g.mean===null?0:g.mean;}));
-    var scale=Math.ceil(max/20)*20;
-    html+='<div class="anchor-bars" dir="rtl">';
-    groups.forEach(function(g){
-      var own=answers.anchor_value>=g.range[0]&&answers.anchor_value<=g.range[1];
-      html+='<div class="anchor-row"><div class="anchor-row-label"><span>عدد '+n(g.range[0])+' تا '+n(g.range[1])+'</span><small>'+n(g.n)+' نفر</small></div><div class="anchor-track" dir="ltr">'+(g.mean===null?'':'<span class="anchor-mean" style="width:'+(g.mean/scale*100)+'%"></span>')+(own?'<span class="anchor-mine" style="left:'+Math.min(99,answers.anchor_wtp/scale*100)+'%" title="قیمت تو: '+n(answers.anchor_wtp)+' هزار تومان"></span>':'')+'</div><strong class="anchor-value">'+(g.mean===null?'—':n(g.mean))+'</strong></div>';
-    });
-    html+='<div class="anchor-scale" dir="ltr"><span>۰</span><span>'+n(scale/2)+'</span><span>'+n(scale)+'</span></div></div><div class="chart-legend"><span>▬ میانگین کلاس</span><span class="mine-key">┃ قیمت تو: '+n(answers.anchor_wtp)+'</span></div>';
-    if(groups.some(function(g){return g.mean===null;}))html+='<p class="chart-footnote">میانگین هر گروه از ۵ پاسخ نمایش داده می‌شود.</p>';
+    var stat=aggregate.anchor||{},r=stat.r,points=stat.points||[];
+    var ymax=Math.max(20,Math.ceil(Math.max(answers.anchor_wtp,...points.map(function(p){return p[1];}))/20)*20);
+    function x(v){return 54+(v-10)/89*330;}function y(v){return 228-v/ymax*188;}
+    var html='<div class="chart-caption">عدد اولیه و قیمت پیشنهادی · هر نقطه یک پاسخ</div><svg class="anchor-chart" viewBox="0 0 420 292" role="img" aria-label="نمودار پراکنش عدد لنگر و قیمت پیشنهادی، خط روند کلاس و پاسخ سبز تو"><defs><clipPath id="anchor-plot-clip"><rect x="54" y="40" width="330" height="188"/></clipPath></defs>';
+    [0,.5,1].forEach(function(t){var yy=y(ymax*t);html+='<path d="M54 '+yy+'H384" stroke="#dce3d2" stroke-dasharray="3 4"/><text x="44" y="'+(yy+4)+'" text-anchor="end" font-size="11" fill="#707b66">'+n(ymax*t)+'</text>';});
+    html+='<path d="M54 40V228H384" fill="none" stroke="#a7b599"/><g font-size="11" fill="#707b66" text-anchor="middle">';
+    [10,30,50,70,99].forEach(function(v){html+='<text x="'+x(v)+'" y="248">'+n(v)+'</text>';});
+    html+='<text x="219" y="276">عدد اولیه</text><text x="54" y="21" text-anchor="start">قیمت پیشنهادی · هزار تومان</text></g><g clip-path="url(#anchor-plot-clip)">';
+    if(stat.trend)html+='<line x1="'+x(10)+'" y1="'+y(stat.trend.intercept+stat.trend.slope*10)+'" x2="'+x(99)+'" y2="'+y(stat.trend.intercept+stat.trend.slope*99)+'" stroke="#cf683d" stroke-width="2" stroke-dasharray="6 4"/>';
+    points.forEach(function(p){html+='<circle cx="'+x(p[0])+'" cy="'+y(p[1])+'" r="4" fill="#879b73" fill-opacity=".55"><title>عدد '+n(p[0])+'، قیمت '+n(p[1])+' هزار تومان</title></circle>';});
+    html+='</g><circle cx="'+x(answers.anchor_value)+'" cy="'+y(answers.anchor_wtp)+'" r="6" fill="#315f26" stroke="#fff" stroke-width="2"><title>پاسخ تو</title></circle></svg><div class="chart-legend"><span>● پاسخ‌های کلاس</span><span style="color:#cf683d">– خط روند</span><span class="mine-key">● پاسخ تو</span></div>';
+    if(!points.length)html+='<p class="chart-footnote">برای دریافت نقطه‌های کلاس، آمار را تازه‌سازی کن.</p>';
     if(aggregate.anchor)html+='<div class="correlation"><strong dir="ltr">r = '+(r==null?'—':new Intl.NumberFormat('fa-IR',{minimumFractionDigits:2,maximumFractionDigits:2}).format(r))+'</strong><span>'+(r==null?'برای محاسبهٔ همبستگی، عددهای اولیه و قیمت‌ها باید متنوع باشند.':r>0.1?'در کلاس، عدد اولیهٔ بالاتر با قیمت بالاتر همراه است.':r<-.1?'در کلاس، عدد اولیهٔ بالاتر با قیمت پایین‌تر همراه است.':'قیمت‌های کلاس رابطهٔ خطی پررنگی با عدد اولیه ندارند.')+'</span></div>';
     return html;
   }
@@ -166,7 +167,7 @@
     document.querySelectorAll('[data-scroll]').forEach(function(a){a.addEventListener('click',function(ev){ev.preventDefault();document.getElementById(a.dataset.scroll).scrollIntoView({behavior:'smooth'});});});
     document.getElementById('download-results').addEventListener('click',function(){var blob=new Blob([JSON.stringify({receipt:state.receipt,record:state.record},null,2)],{type:'application/json;charset=utf-8'});var url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='my-choices.json';a.click();setTimeout(function(){URL.revokeObjectURL(url);},1000);});
     document.getElementById('print-results').addEventListener('click',function(){window.print();});var refresh=document.getElementById('refresh-aggregate');if(refresh)refresh.addEventListener('click',refreshAggregate);
-    if(live&&aggregate&&aggregate.reportVersion!==2&&refreshAt===0)refreshAggregate();
+    if(live&&aggregate&&aggregate.reportVersion!==3&&refreshAt===0)refreshAggregate();
   }
 
   async function refreshAggregate(){
