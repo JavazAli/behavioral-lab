@@ -47,7 +47,7 @@ function submitRecord(record) {
     var now=Date.now(),start=Date.parse(props.getProperty('START_AT')||''),end=Date.parse(props.getProperty('END_AT')||'');
     if(Number.isFinite(start)&&now<start)return fail_('فعالیت هنوز شروع نشده است.',false);
     if(Number.isFinite(end)&&now>end)return fail_('مهلت ثبت پاسخ‌ها پایان یافته است.',false);
-    if(rows.filter(function(r){return r[2]===studyId;}).length>=Number(props.getProperty('MAX_RESPONSES')||150))return fail_('ظرفیت ثبت این فعالیت تکمیل شده است. با مدرس هماهنگ کنید.',false);
+    if(rows.filter(function(r){return r[2]===studyId&&String(r[4]).indexOf('SAMPLE-')!==0;}).length>=Number(props.getProperty('MAX_RESPONSES')||300))return fail_('ظرفیت ثبت این فعالیت تکمیل شده است. با مدرس هماهنگ کنید.',false);
     if(rows.some(function(r){return r[2]===studyId&&r[6]===p.studentId;}))return fail_('برای این شمارهٔ دانشجویی قبلاً پاسخ ثبت شده است.',false);
     // Global server-side write budget; client controls are never trusted.
     var cache=CacheService.getScriptCache(),minute=Math.floor(now/60000),budgetKey='writes:'+studyId+':'+minute,count=Number(cache.get(budgetKey)||0);
@@ -100,7 +100,7 @@ function safeText_(text){var s=String(text);return /^[\s]*[=+\-@\t\r\n]/.test(s)
 function aggregate_(rows,studyId,fresh){
   var cache=CacheService.getScriptCache(),key='aggregate:'+studyId+':'+LabData.version;
   if(!fresh){var cached=cache.get(key);if(cached)return JSON.parse(cached);}
-  var records=[];rows.forEach(function(r){if(r[2]!==studyId||r[3]!==LabData.version)return;try{var a=JSON.parse(r[11]);if(LabData.questions.every(function(q){return LabCore.validAnswer(q,a[q.id]);}))records.push({answers:a,participant:{studentId:r[6]}});}catch(_){} });
+  var records=[];rows.forEach(function(r){if(r[2]!==studyId||r[3]!==LabData.version)return;try{var a=JSON.parse(r[11]);if(LabData.questions.every(function(q){return LabCore.validAnswer(q,a[q.id]);}))records.push({answers:a,participant:{studentId:r[6]},isSample:String(r[4]).indexOf('SAMPLE-')===0});}catch(_){} });
   var summary=LabCore.summarize(records,5);cache.put(key,JSON.stringify(summary),30);return summary;
 }
 
@@ -115,7 +115,7 @@ function setupLab_(){
   // Preserve IDs as strings, including leading zeros.
   ss.getSheetByName('Responses').getRange('G:G').setNumberFormat('@');
   if(!p.getProperty('OPEN'))p.setProperty('OPEN','false');
-  if(!p.getProperty('MAX_RESPONSES'))p.setProperty('MAX_RESPONSES','150');
+  if(!p.getProperty('MAX_RESPONSES'))p.setProperty('MAX_RESPONSES','300');
   console.log('Setup finished. Use createParticipantCodes_ to issue codes.');
 }
 
