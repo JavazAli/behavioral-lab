@@ -24,7 +24,27 @@
     </div>
   </header>
   <main id="main" tabindex="-1"></main>
-  <footer class="site-footer"><div class="container footer-inner"><div><span class="footer-dot"></span> اقتصاد خرد دوره فرعی دانشگاه صنعتی شریف / پاییز ۱۴۰۵</div><span>یک تجربه برای پرسیدنِ سؤال‌های بهتر.</span></div></footer>
+  <footer class="site-footer"><div class="container footer-inner">
+    <button class="contact-trigger" type="button" data-contact aria-label="دربارهٔ پروژه و ارتباط" aria-haspopup="dialog" aria-controls="contact-dialog" title="دربارهٔ پروژه و ارتباط"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="m4 7 8 6 8-6"/></svg></button>
+    <div>اقتصاد خرد دوره فرعی دانشگاه صنعتی شریف / پاییز ۱۴۰۵</div>
+  </div></footer>
+  <dialog id="contact-dialog" class="contact-dialog" aria-labelledby="contact-title">
+    <form method="dialog" class="contact-close-form"><button class="contact-close" aria-label="بستن" autofocus>×</button></form>
+    <div class="contact-logos">
+      <img class="sharif-logo" src="assets/sharif.svg" width="64" height="64" alt="نشان دانشگاه صنعتی شریف">
+      <span class="contact-logo-divider" aria-hidden="true"></span>
+      <svg class="project-logo" viewBox="0 0 80 80" role="img" aria-label="نشان آزمایشگاه انتخاب"><g transform="rotate(-12 40 40)"><rect x="14" y="14" width="22" height="22" rx="4" fill="#183f35"/><rect x="44" y="14" width="22" height="22" rx="4" fill="#183f35"/><rect x="44" y="44" width="22" height="22" rx="4" fill="#cf683d"/></g></svg>
+    </div>
+    <h2 id="contact-title">درس اقتصاد خرد دوره فرعی</h2>
+    <p class="contact-course">دکتر تجریشی <span aria-hidden="true">/</span> پاییز ۱۴۰۵<br><strong>دانشگاه صنعتی شریف</strong></p>
+    <div class="contact-author"><small>ساخته شده توسط:</small><p>علی جوادی یگانه</p></div>
+    <small class="contact-invitation">ارتباط، همکاری در پروژه، پیشنهاد:</small>
+    <div class="contact-links">
+      <a href="https://github.com/JavazAli/behavioral-lab" target="_blank" rel="noopener noreferrer"><span>GitHub</span><span>پروژه ↗</span></a>
+      <a href="https://t.me/ali_javadi" target="_blank" rel="noopener noreferrer"><span>Telegram</span><bdi>@ali_javadi</bdi></a>
+      <a href="mailto:ali.javadi.yeganeh@gmail.com"><span>Gmail</span><bdi>ali.javadi.yeganeh@gmail.com</bdi></a>
+    </div>
+  </dialog>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
   <noscript><div class="container notice">برای انجام آزمایش‌ها، JavaScript مرورگر را فعال کنید.</div></noscript>
 </body>
