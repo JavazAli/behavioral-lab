@@ -2,7 +2,7 @@
   'use strict';
   var D=window.LabData,C=window.LabCore,config=window.LAB_CONFIG;
   var main=document.getElementById('main'),live=!!config.endpoint,storageKey='behavioral-lab:'+config.studyId+':'+(live?'live':'demo');
-  var state=null,storageOK=true,submitting=false,aggregate=null,refreshAt=0,toastTimer;
+  var state=null,storageOK=true,submitting=false,aggregate=null,refreshAt=0,toastTimer,recoveryIssue='',storedRaw=null;
   var transport=live?new window.LabTransport(config.endpoint):null;
   var fa=new Intl.NumberFormat('fa-IR',{maximumFractionDigits:1});
   var questionMap=Object.fromEntries(D.questions.map(function(q){return [q.id,q];}));
@@ -11,13 +11,43 @@
   function esc(v){return String(v==null?'':v).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
   function save(){try{localStorage.setItem(storageKey,JSON.stringify(state));}catch(_){storageOK=false;showStorageWarning();}}
   function showStorageWarning(){if(!document.getElementById('storage-warning'))main.insertAdjacentHTML('afterbegin','<div id="storage-warning" class="container notice error storage-warning" role="alert">ذخیرهٔ محلی مرورگر در دسترس نیست. تا پایان و دریافت تأیید ثبت، این صفحه را نبندید.</div>');}
-  try{var stored=JSON.parse(localStorage.getItem(storageKey)||'null');if(stored&&stored.record&&stored.record.studyId===config.studyId&&stored.record.version===D.version){var knownOrder=stored.record.order;if(Array.isArray(knownOrder)&&knownOrder.length===D.questions.length&&new Set(knownOrder).size===D.questions.length&&knownOrder.every(function(id){return !!questionMap[id];})&&stored.record.answers&&typeof stored.record.answers==='object'){state=stored;if(state.confirmed&&D.questions.every(function(q){return C.validAnswer(q,state.record.answers[q.id]);}))aggregate=state.aggregate||null;else state.confirmed=false;}}}catch(_){storageOK=false;}
+  function isObject(value){return !!value&&typeof value==='object'&&!Array.isArray(value);}
+  function validTime(value){return typeof value==='string'&&/^\d{4}-\d{2}-\d{2}T[0-9:.]+Z$/.test(value)&&Number.isFinite(Date.parse(value));}
+  function validReceipt(receipt,record){return isObject(receipt)&&receipt.id===record.id&&validTime(receipt.receivedAt);}
+  function confirmed(){return !!state&&state.confirmed===true;}
+  // completedAt is already persisted before the first request. Until acknowledged,
+  // it also marks an immutable request that may already have reached Sheets.
+  function pendingSubmission(){return !!state&&!confirmed()&&state.record.completedAt!=null;}
+  function usableAggregate(value){return isObject(value)&&Number.isInteger(value.n)&&value.n>=0&&typeof value.withheld==='boolean'&&(value.withheld||(isObject(value.questions)&&isObject(value.experiments)&&D.questions.every(function(q){return isObject(value.questions[q.id]);})&&D.experiments.every(function(e){return isObject(value.experiments[e.id]);})));}
+  function restore(raw){
+    if(raw==null||raw==='null')return null;
+    var value=JSON.parse(raw),record=value&&value.record;
+    if(!isObject(value)||!isObject(record)||record.studyId!==config.studyId||record.version!==D.version||!isObject(record.participant)||!isObject(record.answers)||Object.keys(record.answers).some(function(id){return !Object.prototype.hasOwnProperty.call(questionMap,id);})||!Array.isArray(record.order)||record.order.length!==D.questions.length||new Set(record.order).size!==D.questions.length||record.order.some(function(id){return typeof id!=='string'||!Object.prototype.hasOwnProperty.call(questionMap,id);})||!/^[a-zA-Z0-9-]{16,80}$/.test(record.id||'')||!validTime(record.startedAt))throw new Error('saved-state');
+    var complete=!C.validateSubmission(record,live,config.studyId);
+    if(value.confirmed===true&&complete&&validReceipt(value.receipt,record))return value;
+    if(value.confirmed===true||value.receipt!=null||record.completedAt!=null){
+      // A missing/corrupt receipt is not an acknowledgement. Retry the same complete
+      // snapshot instead of creating another record or reopening its answers.
+      if(!complete||!validTime(record.completedAt))throw new Error('saved-submission');
+      value.confirmed=false;return value;
+    }
+    if(value.confirmed!=null&&value.confirmed!==false)throw new Error('saved-confirmation');
+    value.confirmed=false;
+    record.participant=C.cleanParticipant(record.participant);
+    if(!isObject(record.timings))record.timings={};
+    value.index=Number.isInteger(value.index)?Math.max(0,Math.min(value.flowVersion===2?9:D.questions.length-1,value.index)):0;
+    return value;
+  }
+  try{storedRaw=localStorage.getItem(storageKey);}catch(_){storageOK=false;}
+  if(storedRaw!=null){try{state=restore(storedRaw);if(confirmed()&&usableAggregate(state.aggregate))aggregate=state.aggregate;}catch(_){recoveryIssue='اطلاعات ذخیره‌شدهٔ این مرورگر کامل یا سازگار نیست. نسخهٔ ذخیره‌شده را دریافت کن و برای بازیابی با مدرس هماهنگ کن؛ داده‌ها پاک نشده‌اند.';}}
+  function downloadSaved(){var blob=new Blob([storedRaw||JSON.stringify(state,null,2)],{type:'application/json;charset=utf-8'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='saved-choices.json';a.click();setTimeout(function(){URL.revokeObjectURL(url);},1000);}
+  function recovery(){setPage('<section class="entry container"><h1>بازیابی اطلاعات</h1><p role="alert">'+esc(recoveryIssue)+'</p><button id="download-saved" class="btn btn-primary">دریافت اطلاعات ذخیره‌شده ↓</button><button id="retry-restore" class="quiet-button">بارگذاری دوباره</button></section>');document.getElementById('download-saved').addEventListener('click',downloadSaved);document.getElementById('retry-restore').addEventListener('click',function(){location.reload();});}
   // A random browser token replaces instructor-issued codes. It is not a fingerprint.
   function browserToken(){
     var key='behavioral-lab:'+config.studyId+':browser-token',token;
     try{token=localStorage.getItem(key);}catch(_){}
     if(!/^[A-Z0-9-]{8,64}$/.test(token||'')){
-      token=state&&state.record.participant.code;
+      token=state&&state.record.participant&&state.record.participant.code;
       if(!/^[A-Z0-9-]{8,64}$/.test(token||'')||token.indexOf('DEMO-')===0)token='OPEN-'+crypto.randomUUID().toUpperCase();
       try{localStorage.setItem(key,token);}catch(_){}
     }
@@ -38,13 +68,13 @@
   }
 
   function start(){
-    if(state&&(state.confirmed||/^\d{9}$/.test(state.record.participant.studentId))){navigate(state.confirmed?'/results':'/question/'+(state.index||0));return;}
-    setPage('<section class="entry container"><a class="back-link" href="#/">→ برگشت</a><div class="eyebrow">قبل از اولین انتخاب</div><h1>فقط خودت باش.</h1><p class="muted">موقعیت‌ها فرضی‌اند. هر شمارهٔ دانشجویی فقط یک بار ثبت می‌شود.</p>'+modeNotice()+'<form id="participant-form" novalidate><div class="form-grid"><div class="field"><label for="full-name">نام و نام خانوادگی</label><input id="full-name" name="name" autocomplete="name" maxlength="100" required></div><div class="field"><label for="student-id">شمارهٔ دانشجویی</label><input id="student-id" name="studentId" inputmode="numeric" dir="ltr" minlength="9" maxlength="9" required aria-describedby="student-id-help"><small id="student-id-help">دقیقاً ۹ رقم؛ ارقام فارسی هم پذیرفته می‌شوند.</small></div>'+'<fieldset class="field full"><legend>جزوه را قبلاً خوانده‌ای؟</legend><div class="radio-inline"><label><input type="radio" name="read" value="no"> نه</label><label><input type="radio" name="read" value="yes"> بله</label></div></fieldset></div><p id="form-error" class="form-error" role="alert"></p><button class="btn btn-primary" type="submit">بریم ←</button></form></section>');
+    if(state&&(state.confirmed||!C.validateParticipant(state.record.participant,live))){navigate(state.confirmed?'/results':'/question/'+(state.index||0));return;}
+    setPage('<section class="entry container"><a class="back-link" href="#/">→ برگشت</a><div class="eyebrow">قبل از اولین انتخاب</div><h1>اطلاعات دانشجو</h1><p class="muted">موقعیت‌ها فرضی‌اند. هر شمارهٔ دانشجویی فقط یک بار ثبت می‌شود.</p>'+modeNotice()+'<form id="participant-form" novalidate><div class="form-grid"><div class="field"><label for="full-name">نام و نام خانوادگی</label><input id="full-name" name="name" autocomplete="name" maxlength="100" required></div><div class="field"><label for="student-id">شمارهٔ دانشجویی</label><input id="student-id" name="studentId" inputmode="numeric" dir="ltr" minlength="9" maxlength="9" required aria-describedby="student-id-help"><small id="student-id-help">دقیقاً ۹ رقم؛ ارقام فارسی هم پذیرفته می‌شوند.</small></div>'+'<fieldset class="field full"><legend>جزوه را قبلاً خوانده‌ای؟</legend><div class="radio-inline"><label><input type="radio" name="read" value="no"> نه</label><label><input type="radio" name="read" value="yes"> بله</label></div></fieldset></div><p id="form-error" class="form-error" role="alert"></p><button class="btn btn-primary" type="submit">بریم ←</button></form></section>');
     if(state){document.getElementById('full-name').value=state.record.participant.name;document.getElementById('student-id').value=state.record.participant.studentId;}
     document.getElementById('participant-form').addEventListener('submit',function(event){event.preventDefault();var f=event.currentTarget;var values=new FormData(f);var participant=C.cleanParticipant({name:values.get('name'),studentId:values.get('studentId'),code:live?browserToken():'DEMO-'+crypto.randomUUID(),read:values.get('read')});var error=C.validateParticipant(participant,live);if(error){document.getElementById('form-error').textContent=error;return;}if(state){state.record.participant=participant;}else state={record:{id:crypto.randomUUID(),studyId:config.studyId,version:D.version,participant:participant,startedAt:new Date().toISOString(),order:D.questions.map(function(q){return q.id;}),answers:{},timings:{}},index:0,flowVersion:2,confirmed:false,mode:live?'live':'demo'};save();navigate('/question/'+(state.index||0));});
   }
   // A UI-only grouping: question IDs and the server's submission schema stay compatible.
-  if(state&&!state.confirmed&&state.flowVersion!==2){
+  if(state&&!state.confirmed&&!pendingSubmission()&&state.flowVersion!==2){
     var oldId=state.record.order[state.index||0];
     state.index=Math.max(0,D.experiments.findIndex(function(e){return e.questions.some(function(q){return q.id===oldId;});}));
     state.record.order=D.questions.map(function(q){return q.id;});state.flowVersion=2;save();
@@ -56,7 +86,7 @@
   }
   function question(index){
     if(!state){navigate('/start');return;}if(state.confirmed){navigate('/results');return;}
-    if(!/^\d{9}$/.test(state.record.participant.studentId)){navigate('/start');return;}
+    if(C.validateParticipant(state.record.participant,live)){navigate('/start');return;}
     index=Math.max(0,Math.min(9,Number.isInteger(index)?index:0));state.index=index;save();
     var e=D.experiments[index],entered=Date.now();
     setPage('<section class="container experiment"><div class="step-top"><a href="#/" aria-label="ذخیره و خروج">→</a><span>آزمایش '+n(index+1)+' <span class="muted">/ ۱۰</span></span><span class="save-label" id="save-label">'+(storageOK?'ذخیرهٔ خودکار':'ذخیرهٔ محلی در دسترس نیست')+'</span></div><div class="lab-progress" role="progressbar" aria-label="تعداد پاسخ‌ها" aria-valuemin="0" aria-valuemax="20" aria-valuenow="'+answeredCount()+'"><span style="width:'+answeredCount()/20*100+'%"></span></div><h1 class="step-heading">انتخاب تو؟</h1><form id="question-form" novalidate><div class="question-pair '+(e.questions.length===1?'single':'')+'">'+e.questions.map(inputHtml).join('')+'</div><p id="question-error" class="form-error" role="alert"></p><div class="question-buttons"><button id="previous" class="quiet-button" type="button">→ قبلی</button><button class="btn btn-primary" type="submit">'+(index===9?'مرور و ثبت':'بعدی')+' ←</button></div></form><nav class="step-dots" aria-label="مراحل">'+D.experiments.map(function(ex,i){var done=ex.questions.every(function(q){return C.validAnswer(q,state.record.answers[q.id]);});return '<button type="button" data-go="'+i+'" aria-label="آزمایش '+n(i+1)+'" '+(index===i?'aria-current="step"':'')+' class="'+(done?'done':'')+'"></button>';}).join('')+'</nav></section>');
@@ -71,25 +101,26 @@
   function answerLabel(q,a){if(q.type==='number')return n(a)+' '+q.unit;var o=q.options.find(function(o){return o.value===a;});return o?o.label:'بدون پاسخ';}
   function review(){
     if(!state){navigate('/start');return;}if(state.confirmed){navigate('/results');return;}
-    setPage('<section class="container review-layout"><div class="eyebrow">آخرین نگاه</div><h1>همین‌ها انتخاب توست؟</h1><p class="muted">می‌توانی قبل از ثبت، تغییرشان بدهی.</p>'+modeNotice()+'<div class="review-list">'+D.experiments.map(function(e,i){return '<div class="review-row"><span class="review-num">'+n(i+1)+'</span><div>'+e.questions.map(function(q){return '<p>'+esc(C.validAnswer(q,state.record.answers[q.id])?answerLabel(q,state.record.answers[q.id]):'بدون پاسخ')+'</p>';}).join('')+'</div><button class="quiet-button" data-edit="'+i+'">ویرایش</button></div>';}).join('')+'</div><div class="submit-area"><p class="muted">'+n(answeredCount())+' از ۲۰ انتخاب</p><button id="submit-all" class="btn btn-primary" '+(answeredCount()<20?'disabled':'')+'>ثبت و کشف ماجرا ←</button><div id="submit-status" role="status" aria-live="polite"></div></div></section>');
-    document.querySelectorAll('[data-edit]').forEach(function(b){b.addEventListener('click',function(){navigate('/question/'+b.dataset.edit);});});document.getElementById('submit-all').addEventListener('click',submit);
+    setPage('<section class="container review-layout"><div class="eyebrow">آخرین نگاه</div><h1>همین‌ها انتخاب توست؟</h1><p class="muted">'+(pendingSubmission()?'تأیید ثبت هنوز دریافت نشده است. برای بازیابی تأیید، همین پاسخ‌های نهایی را دوباره ارسال کن؛ شناسه و داده‌ها ثابت می‌مانند.':'می‌توانی قبل از ثبت، تغییرشان بدهی.')+'</p>'+modeNotice()+'<div class="review-list">'+D.experiments.map(function(e,i){return '<div class="review-row"><span class="review-num">'+n(i+1)+'</span><div>'+e.questions.map(function(q){return '<p>'+esc(C.validAnswer(q,state.record.answers[q.id])?answerLabel(q,state.record.answers[q.id]):'بدون پاسخ')+'</p>';}).join('')+'</div><button class="quiet-button" data-edit="'+i+'" '+(pendingSubmission()?'disabled':'')+'>ویرایش</button></div>';}).join('')+'</div><div class="submit-area"><p class="muted">'+n(answeredCount())+' از ۲۰ انتخاب</p><button id="submit-all" class="btn btn-primary" '+(answeredCount()<20?'disabled':'')+'>'+(pendingSubmission()?'تلاش دوباره برای دریافت تأیید':'ثبت و کشف ماجرا ←')+'</button><div id="submit-status" role="status" aria-live="polite"></div></div></section>');
+    document.querySelectorAll('[data-edit]').forEach(function(b){b.addEventListener('click',function(){if(!pendingSubmission()&&!submitting)navigate('/question/'+b.dataset.edit);});});document.getElementById('submit-all').addEventListener('click',submit);
   }
 
   async function submit(){
-    if(submitting)return;if(!/^\d{9}$/.test(state.record.participant.studentId)){navigate('/start');return;}var error=C.validateSubmission(state.record,live,config.studyId);if(error){toast(error);return;}
+    if(confirmed()){render();return;}if(submitting)return;if(!state||recoveryIssue){render();return;}if(C.validateParticipant(state.record.participant,live)){navigate('/start');return;}var error=C.validateSubmission(state.record,live,config.studyId);if(error){toast(error);return;}
     submitting=true;var button=document.getElementById('submit-all'),status=document.getElementById('submit-status');document.querySelectorAll('[data-edit]').forEach(function(b){b.disabled=true;});button.disabled=true;button.innerHTML='<span class="spinner" aria-hidden="true"></span> '+(live?'در حال دریافت تأیید ثبت…':'در حال آماده‌سازی گزارش…');
-    state.record.completedAt=state.record.completedAt||new Date().toISOString();save();
+    var wasPending=pendingSubmission();state.record.completedAt=state.record.completedAt||new Date().toISOString();save();
+    var payload=JSON.parse(JSON.stringify(state.record));
     try{
       var result;
       if(live){
         await new Promise(function(resolve){setTimeout(resolve,Math.random()*2500);});
         for(var attempt=0;attempt<5;attempt++){
-          try{result=await transport.call('submit',state.record);break;}catch(err){if(!err.retryable||attempt===4)throw err;status.className='submit-status notice';status.textContent='سرویس شلوغ یا ارتباط ناپایدار است. تلاش مجدد '+n(attempt+1)+' از ۴؛ پاسخ‌ها حفظ شده‌اند.';await new Promise(function(resolve){setTimeout(resolve,2000*Math.pow(2,attempt)+Math.random()*3000);});}
+          try{result=await transport.call('submit',payload);if(result.ok!==true||!validReceipt(result,payload)){var ackError=new Error('تأیید معتبر ثبت دریافت نشد. با همین پاسخ‌ها دوباره تلاش کن.');ackError.retryable=true;throw ackError;}break;}catch(err){if(err.retryable!==false)wasPending=true;if(!err.retryable||attempt===4)throw err;status.className='submit-status notice';status.textContent='سرویس شلوغ یا ارتباط ناپایدار است. تلاش مجدد '+n(attempt+1)+' از ۴؛ پاسخ‌ها حفظ شده‌اند.';await new Promise(function(resolve){setTimeout(resolve,2000*Math.pow(2,attempt)+Math.random()*3000);});}
         }
-        aggregate=result.aggregate;state.receipt={receivedAt:result.receivedAt,id:result.id};
+        aggregate=usableAggregate(result.aggregate)?result.aggregate:null;state.receipt={receivedAt:result.receivedAt,id:result.id};
       }else{aggregate=null;state.receipt={receivedAt:new Date().toISOString(),id:state.record.id};}
       state.confirmed=true;state.aggregate=aggregate;save();navigate('/results');
-    }catch(err){if(status&&status.isConnected){status.className='submit-status notice error';status.textContent=err.message;button.disabled=false;button.textContent='تلاش دوباره برای ثبت';document.querySelectorAll('[data-edit]').forEach(function(b){b.disabled=false;});}else toast(err.message);}
+    }catch(err){if(err.retryable===false&&!wasPending){delete state.record.completedAt;save();}submitting=false;render();var failure=document.getElementById('submit-status');if(failure){failure.className='submit-status notice error';failure.textContent=err.message;}else toast(err.message);}
     finally{submitting=false;}
   }
   function miniBars(rows,max,unit){
@@ -158,11 +189,12 @@
     }
     return html+detailDistribution(e,group)+'</section>';
   }
+  function classHtml(e,answers){try{return groupHtml(e,answers);}catch(_){return '<section class="group-block"><h3>کلاس چه کرد؟</h3><p>آمار ذخیره‌شده قابل نمایش نیست؛ تازه‌سازی آمار را بزن. تحلیل فردی تو محفوظ است.</p></section>';}}
   var effectNames={saving:'Relative Thinking',subscription:'Decoy Effect',fairness:'Ultimatum Game / Social Preferences',reflection:'Reflection Effect',time:'Present Bias',certainty:'Certainty Effect',consistency:'Transitivity of Preferences',ticket:'Mental Accounting',anchor:'Anchoring Effect',framing:'Framing Effect'};
   function results(){
     if(!state||!state.confirmed){setPage('<section class="entry container"><h1>اول انتخاب، بعد کشف.</h1><a class="btn btn-primary" href="#/start">شروع ←</a></section>');return;}
     var answers=C.withAnchor(state.record);
-    var cards=D.experiments.map(function(e,i){var r=C.analyze(e.id,answers),source=D.sources[e.source],lesson=C.lessons[e.id],match=C.targetMatch(e.id,answers);return '<article class="result-card" id="result-'+e.id+'"><div class="result-card-header"><span class="concept">'+esc(lesson.concept)+'</span><span class="result-number">'+n(i+1)+' / ۱۰</span></div><h2>'+esc(lesson.title)+'</h2><p class="insight">'+esc(lesson.problem)+' <span class="effect-english" lang="en" dir="ltr">('+effectNames[e.id]+')</span></p>'+(e.id==='consistency'?'':'<div class="expected-box"><h3>در این آزمایش، انتظار چیست؟</h3><p>'+esc(lesson.expected)+'</p></div>')+'<div class="result-split"><section class="personal-result"><h3>انتخاب تو چه می‌گوید؟</h3><span class="match-chip '+(match===true?'matched':match===false?'different':'')+'">'+(e.id==='consistency'?(r.key==='cycle'?'چرخهٔ ترجیحات':'بدون چرخه'):match===null?'قیمت تو در کنار لنگر':match?'همسو با انتظار آزمایش':'متفاوت از انتظار آزمایش')+'</span><h4 class="finding-title">'+esc(r.title)+'</h4><p>'+esc(r.text)+'</p><details class="answer-details"><summary>انتخاب‌هایت را ببین</summary><div class="your-answers">'+e.questions.map(function(q,j){return '<div class="answer-tile"><small>موقعیت '+n(j+1)+'</small><strong>'+esc(answerLabel(q,answers[q.id]))+'</strong></div>';}).join('')+'</div></details></section>'+groupHtml(e,answers)+'</div><details class="history-details"><summary>ایده را بیشتر باز کن +</summary><p>'+esc(lesson.more)+'</p><a class="source-link" href="'+esc(source.url)+'" target="_blank" rel="noopener noreferrer" lang="en">'+esc(source.title)+' ↗</a></details></article>';}).join('');
+    var cards=D.experiments.map(function(e,i){var r=C.analyze(e.id,answers),source=D.sources[e.source],lesson=C.lessons[e.id],match=C.targetMatch(e.id,answers);return '<article class="result-card" id="result-'+e.id+'"><div class="result-card-header"><span class="concept">'+esc(lesson.concept)+'</span><span class="result-number">'+n(i+1)+' / ۱۰</span></div><h2>'+esc(lesson.title)+'</h2><p class="insight">'+esc(lesson.problem)+' <span class="effect-english" lang="en" dir="ltr">('+effectNames[e.id]+')</span></p>'+(e.id==='consistency'?'':'<div class="expected-box"><h3>در این آزمایش، انتظار چیست؟</h3><p>'+esc(lesson.expected)+'</p></div>')+'<div class="result-split"><section class="personal-result"><h3>انتخاب تو چه می‌گوید؟</h3><span class="match-chip '+(match===true?'matched':match===false?'different':'')+'">'+(e.id==='consistency'?(r.key==='cycle'?'چرخهٔ ترجیحات':'بدون چرخه'):match===null?'قیمت تو در کنار لنگر':match?'همسو با انتظار آزمایش':'متفاوت از انتظار آزمایش')+'</span><h4 class="finding-title">'+esc(r.title)+'</h4><p>'+esc(r.text)+'</p><details class="answer-details"><summary>انتخاب‌هایت را ببین</summary><div class="your-answers">'+e.questions.map(function(q,j){return '<div class="answer-tile"><small>موقعیت '+n(j+1)+'</small><strong>'+esc(answerLabel(q,answers[q.id]))+'</strong></div>';}).join('')+'</div></details></section>'+classHtml(e,answers)+'</div><details class="history-details"><summary>ایده را بیشتر باز کن +</summary><p>'+esc(lesson.more)+'</p><a class="source-link" href="'+esc(source.url)+'" target="_blank" rel="noopener noreferrer" lang="en">'+esc(source.title)+' ↗</a></details></article>';}).join('');
     setPage('<section class="container results"><div class="eyebrow">پشت صحنهٔ انتخاب‌ها</div><h1>انتظارِ نظریه، انتخاب تو، رفتار کلاس.</h1><p class="muted">ببین کدام تغییر کوچک تصمیم‌ها را جابه‌جا کرده و تو کجای الگوی کلاس ایستاده‌ای.</p>'+modeNotice()+'<div class="results-toolbar"><span>'+(live?'✓ ثبت تأیید شد':'گزارش آزمایشی')+' · '+(aggregate?(aggregate.sampleCount?n(aggregate.realCount)+' پاسخ + '+n(aggregate.sampleCount)+' نمونهٔ اولیه':n(aggregate.n)+' پاسخ کلاس'):'آمار کلاس هنوز دریافت نشده')+'</span>'+(live?'<button id="refresh-aggregate" class="quiet-button">تازه‌سازی آمار ↻</button>':'')+'</div><nav class="result-tabs" aria-label="تحلیل آزمایش‌ها">'+D.experiments.map(function(e,i){return '<a href="#result-'+e.id+'" data-scroll="result-'+e.id+'">'+n(i+1)+' · '+esc(C.lessons[e.id].concept)+'</a>';}).join('')+'</nav>'+cards+'<div class="end-actions"><button id="download-results" class="quiet-button">دریافت پاسخ‌ها ↓</button><button id="print-results" class="quiet-button">چاپ</button></div></section>');
     document.querySelectorAll('[data-scroll]').forEach(function(a){a.addEventListener('click',function(ev){ev.preventDefault();document.getElementById(a.dataset.scroll).scrollIntoView({behavior:'smooth'});});});
     document.getElementById('download-results').addEventListener('click',function(){var blob=new Blob([JSON.stringify({receipt:state.receipt,record:state.record},null,2)],{type:'application/json;charset=utf-8'});var url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='my-choices.json';a.click();setTimeout(function(){URL.revokeObjectURL(url);},1000);});
@@ -173,17 +205,22 @@
   async function refreshAggregate(){
     if(Date.now()<refreshAt){toast('برای تازه‌سازی بعدی '+n(Math.ceil((refreshAt-Date.now())/1000))+' ثانیه صبر کنید.');return;}
     refreshAt=Date.now()+config.refreshSeconds*1000;var b=document.getElementById('refresh-aggregate');if(b){b.disabled=true;b.textContent='در حال دریافت…';}
-    try{var result=await transport.call('aggregate',{studyId:config.studyId,id:state.record.id,code:state.record.participant.code});aggregate=result.aggregate;state.aggregate=aggregate;save();results();toast('آمار کلاس به‌روز شد.');}catch(error){if(error.message==='برای دیدن آمار، ابتدا پاسخ نهایی خود را ثبت کنید.'){state=null;aggregate=null;save();navigate('/start');toast('ثبت قبلی پاک شده؛ می‌توانی دوباره شروع کنی.');return;}toast(error.message);if(b&&b.isConnected){b.disabled=false;b.textContent='تازه‌سازی آمار ↻';}}
+    try{var result=await transport.call('aggregate',{studyId:config.studyId,id:state.record.id,code:state.record.participant.code});if(!usableAggregate(result.aggregate))throw new Error('آمار معتبر دریافت نشد. تحلیل فردی و رسید ثبت تو محفوظ است.');aggregate=result.aggregate;state.aggregate=aggregate;save();results();toast('آمار کلاس به‌روز شد.');}catch(error){toast(error.message);if(b&&b.isConnected){b.disabled=false;b.textContent='تازه‌سازی آمار ↻';}}
   }
   function guide(){setPage('<section class="container guide-wrap"><a class="back-link" href="#/">→ برگشت</a><h1>از انتخاب تا تحلیل</h1><p>۲۰ پرسش در ۱۰ آزمایش. اول انتخاب کن؛ بعد پیش‌بینی هر ایده، پاسخ خودت و الگوی کلاس را کنار هم ببین.</p><p>پاسخ‌ها در شیت خصوصی مدرس ثبت می‌شوند؛ در گزارش، آمار کلاس بدون نام نمایش داده می‌شود. هر شمارهٔ دانشجویی یک ثبت نهایی دارد.</p><p>پیشرفت روی همین مرورگر ذخیره می‌شود. اگر ارتباط قطع شد، با همان پاسخ‌ها دوباره ثبت را بزن.</p><a class="btn btn-primary" href="#/start">ادامه ←</a></section>');}
   function render(){
     document.body.dataset.page='experience';var hash=location.hash||'#/',route=hash.slice(1);
+    // One guard runs before any editable page is rendered, on startup and hashchange.
+    if(recoveryIssue){recovery();focusMain();return;}
+    if(confirmed()){if(route!=='/results')history.replaceState(null,'','#/results');results();focusMain();return;}
+    if(submitting){if(route!=='/review')history.replaceState(null,'','#/review');return;}
+    if(pendingSubmission()&&route!=='/review'){history.replaceState(null,'','#/review');route='/review';}
     if(route==='/')home();else if(route==='how'){home();return;}else if(route==='/start')start();else if(/^\/question\/\d+$/.test(route))question(Number(route.split('/')[2]));else if(route==='/review')review();else if(route==='/results')results();else if(route==='/guide')guide();else{navigate('/');return;}
     focusMain();
   }
-  window.addEventListener('hashchange',function(){if(submitting){if(location.hash!=='#/review')location.hash='/review';return;}render();});
+  window.addEventListener('hashchange',render);
   document.querySelector('.skip').addEventListener('click',function(event){event.preventDefault();main.focus();});
   window.addEventListener('beforeunload',function(event){if(submitting){event.preventDefault();event.returnValue='';}});
-  window.addEventListener('storage',function(event){if(event.key===storageKey){toast('این تجربه در تب دیگری تغییر کرده است. برای جلوگیری از تداخل، فقط در یک تب ادامه دهید.');}});
+  window.addEventListener('storage',function(event){if(event.key===storageKey){if(!submitting&&event.newValue){try{var other=restore(event.newValue);if(other&&other.confirmed===true){state=other;aggregate=usableAggregate(other.aggregate)?other.aggregate:null;recoveryIssue='';render();return;}}catch(_){}}toast('این تجربه در تب دیگری تغییر کرده است. برای جلوگیری از تداخل، فقط در یک تب ادامه دهید.');}});
   render();
 })();
