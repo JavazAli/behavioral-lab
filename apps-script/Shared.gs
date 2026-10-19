@@ -197,7 +197,8 @@
   function withAnchor(record) { var a=Object.assign({},record.answers); a.anchor_value=Math.max(10,Number(digits(record.participant.studentId).slice(-2))); return a; }
   function summarize(records, minPublish) {
     minPublish=minPublish==null?5:minPublish;
-    var summary={ reportVersion:3, version:Data.version, n:records.length, minPublish:minPublish, withheld:records.length<minPublish, generatedAt:new Date().toISOString(), questions:{}, experiments:{}, anchorGroups:[] };
+    var summary={ reportVersion:4, version:Data.version, n:records.length, minPublish:minPublish, withheld:records.length<minPublish, generatedAt:new Date().toISOString(), questions:{}, experiments:{}, anchorGroups:[] };
+    summary.sampleCount=records.filter(function(r){return r.isSample===true;}).length;summary.realCount=records.length-summary.sampleCount;
     if(summary.withheld) return summary;
     Data.questions.forEach(function(q) {
       if(q.type==='choice') { var counts={};q.options.forEach(function(o){counts[o.value]=0;});records.forEach(function(r){counts[r.answers[q.id]]++;});summary.questions[q.id]={type:'choice',n:records.length,counts:counts}; }
