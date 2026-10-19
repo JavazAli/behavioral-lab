@@ -9,7 +9,8 @@ permissions:
   id-token: write
 concurrency:
   group: github-pages
-  cancel-in-progress: true
+  cancel-in-progress: false
+  queue: max
 jobs:
   deploy:
     environment:
